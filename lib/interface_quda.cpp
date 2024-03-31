@@ -1606,6 +1606,9 @@ namespace quda {
       memcpy(diracParam.b_5, inv_param->b_5, sizeof(Complex) * inv_param->Ls);
       memcpy(diracParam.c_5, inv_param->c_5, sizeof(Complex) * inv_param->Ls);
       break;
+    case QUDA_OVERLAP_DSLASH: 
+      diracParam.type = QUDA_OVERLAP_DIRAC;
+      break;
     case QUDA_STAGGERED_DSLASH:
       diracParam.type = pc ? QUDA_STAGGEREDPC_DIRAC : QUDA_STAGGERED_DIRAC;
       break;
@@ -2366,6 +2369,17 @@ void MatQuda(void *h_out, void *h_in, QudaInvertParam *inv_param)
   distanceReweight(in, *inv_param, true);
 
   Dirac *dirac = Dirac::create(diracParam); // create the Dirac operator
+
+  // Setup eigensystem for hermitian Wilson operator
+  if (inv_param->dslash_type == QUDA_OVERLAP_DSLASH) {
+    const int n_eig = inv_param->hermitian_wilson_n_ev;
+    const double invsqrt_tol = inv_param->overlap_invsqrt_tol;
+    std::vector<ColorSpinorField> evecs(n_eig);
+    std::vector<Complex> evals(n_eig);
+    setupHermitianWilson(inv_param, gauge.X(), evecs, evals);
+    ((DiracOverlap *)dirac)->setupHermitianWilson(n_eig, evecs, evals, invsqrt_tol);
+  }
+
   dirac->M(out, in); // apply the operator
   delete dirac; // clean up
 

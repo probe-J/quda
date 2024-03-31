@@ -1406,6 +1406,47 @@ public:
     virtual void prefetch(QudaFieldLocation mem_space, qudaStream_t stream = device::get_default_stream()) const override;
   };
 
+  // Full overlap
+  class DiracOverlap : public DiracWilson {
+
+  protected:
+    double mass_overlap;
+    DiracWilson *wilson;
+    mutable int hermitian_wilson_n_eig;
+    mutable std::vector<ColorSpinorField> hermitian_wilson_evecs;
+    mutable std::vector<double> hermitian_wilson_evals;
+    mutable double remez_tol;
+    mutable int remez_n;
+    mutable std::vector<double> remez_c;
+
+  public:
+    DiracOverlap(const DiracParam &param);
+    DiracOverlap(const DiracOverlap &dirac);
+    virtual ~DiracOverlap();
+    DiracOverlap& operator=(const DiracOverlap &dirac);
+
+    virtual void Dslash(ColorSpinorField &, const ColorSpinorField &, const QudaParity ) const { errorQuda("Not implemented!\n"); }
+    virtual void DslashXpay(ColorSpinorField &, const ColorSpinorField &, const QudaParity, const ColorSpinorField &, const double &) const { errorQuda("Not implemented!\n"); }
+    virtual void M(ColorSpinorField &out, const ColorSpinorField &in) const;
+    virtual void MdagM(ColorSpinorField &out, const ColorSpinorField &in) const;
+
+    virtual void prepare(ColorSpinorField* &src, ColorSpinorField* &sol, ColorSpinorField &x, ColorSpinorField &b, const QudaSolutionType) const;
+    virtual void reconstruct(ColorSpinorField &x, const ColorSpinorField &b, const QudaSolutionType) const;
+
+    virtual QudaDiracType getDiracType() const { return QUDA_OVERLAP_DIRAC; }
+
+    /**
+      @brief If managed memory and prefetch is enabled, prefetch
+      all relevant memory fields (gauge, clover, temporary spinors)
+      to the CPU or GPU as requested
+      @param[in] mem_space Memory space we are prefetching to
+      @param[in] stream Which stream to run the prefetch in (default 0)
+    */
+    virtual void prefetch(QudaFieldLocation mem_space, qudaStream_t stream = device::get_default_stream()) const;
+
+    void setupHermitianWilson(int n_eig, const std::vector<ColorSpinorField> &evecs, const std::vector<Complex> &evals, double invsqrt_tol) const;
+  };
+
   // Full staggered
   class DiracStaggered : public Dirac
   {
@@ -2525,6 +2566,10 @@ public:
         // needs 5th dimension reversal, Mobius needs that inversion...
         errorQuda("Support for Hermitian DWF operator %d does not exist yet", dirac_type);
         break;
+      case QUDA_OVERLAP_DIRAC:
+      case QUDA_OVERLAPPC_DIRAC:
+        errorQuda("Support for Hermitian Overlap operator %d does not exist yet", dirac_type);
+        break;
       case QUDA_STAGGERED_DIRAC:
       case QUDA_ASQTAD_DIRAC:
         // Gamma5 is (-1)^(x+y+z+t)
@@ -2582,6 +2627,9 @@ public:
 
       if (dirac_type == QUDA_GAUGE_LAPLACE_DIRAC || dirac_type == QUDA_GAUGE_LAPLACEPC_DIRAC
           || dirac_type == QUDA_GAUGE_COVDEV_DIRAC)
+        return true;
+
+      if (dirac_type == QUDA_WILSON_DIRAC || dirac_type == QUDA_CLOVER_DIRAC)
         return true;
 
       // subtle: odd operator gets a minus sign
