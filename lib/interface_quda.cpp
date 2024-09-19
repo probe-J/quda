@@ -106,6 +106,11 @@ CloverField *cloverPrecondition = nullptr;
 CloverField *cloverRefinement = nullptr;
 CloverField *cloverEigensolver = nullptr;
 
+ColorSpinorField *OverlapPrecise = nullptr;
+ColorSpinorField *OverlapSloppy = nullptr;
+ColorSpinorField *OverlapPrecondition = nullptr;
+ColorSpinorField *OverlapEigensolver = nullptr;
+
 GaugeField momResident;
 GaugeField *extendedGaugeResident = nullptr;
 
@@ -1838,6 +1843,183 @@ namespace quda {
     dEig = Dirac::create(diracEigParam);
   }
 
+  void massRescale(ColorSpinorField &b, QudaInvertParam &param, bool for_multishift)
+  {
+    double kappa5 = (0.5/(5.0 + param.m5));
+    double kappa = (param.dslash_type == QUDA_DOMAIN_WALL_DSLASH || param.dslash_type == QUDA_DOMAIN_WALL_4D_DSLASH
+                    || param.dslash_type == QUDA_MOBIUS_DWF_DSLASH || param.dslash_type == QUDA_MOBIUS_DWF_EOFA_DSLASH) ?
+      kappa5 :
+      param.kappa;
+
+    logQuda(QUDA_DEBUG_VERBOSE, "Mass rescale: Kappa is: %g\n", kappa);
+    logQuda(QUDA_DEBUG_VERBOSE, "Mass rescale: mass normalization: %d\n", param.mass_normalization);
+    logQuda(QUDA_DEBUG_VERBOSE, "Mass rescale: norm of source in = %g\n", blas::norm2(b));
+
+    // staggered dslash uses mass normalization internally
+    if (param.dslash_type == QUDA_ASQTAD_DSLASH || param.dslash_type == QUDA_STAGGERED_DSLASH) {
+      switch (param.solution_type) {
+        case QUDA_MAT_SOLUTION:
+        case QUDA_MATPC_SOLUTION:
+          if (param.mass_normalization == QUDA_KAPPA_NORMALIZATION) blas::ax(2.0*param.mass, b);
+          break;
+        case QUDA_MATDAG_MAT_SOLUTION:
+        case QUDA_MATPCDAG_MATPC_SOLUTION:
+          if (param.mass_normalization == QUDA_KAPPA_NORMALIZATION) blas::ax(4.0*param.mass*param.mass, b);
+          break;
+        default:
+          errorQuda("Not implemented");
+      }
+      return;
+    }
+
+    // multiply the source to compensate for normalization of the Dirac operator, if necessary
+    // you are responsible for restoring what's in param.offset
+    switch (param.solution_type) {
+      case QUDA_MAT_SOLUTION:
+        if (param.mass_normalization == QUDA_MASS_NORMALIZATION ||
+            param.mass_normalization == QUDA_ASYMMETRIC_MASS_NORMALIZATION) {
+	  blas::ax(2.0*kappa, b);
+          if (for_multishift)
+            for (int i = 0; i < param.num_offset; i++) param.offset[i] *= 2.0 * kappa;
+        }
+        break;
+      case QUDA_MATDAG_MAT_SOLUTION:
+        if (param.mass_normalization == QUDA_MASS_NORMALIZATION ||
+            param.mass_normalization == QUDA_ASYMMETRIC_MASS_NORMALIZATION) {
+	  blas::ax(4.0*kappa*kappa, b);
+          if (for_multishift)
+            for (int i = 0; i < param.num_offset; i++) param.offset[i] *= 4.0 * kappa * kappa;
+        }
+        break;
+      case QUDA_MATPC_SOLUTION:
+        if (param.mass_normalization == QUDA_MASS_NORMALIZATION) {
+	  blas::ax(4.0*kappa*kappa, b);
+          if (for_multishift)
+            for (int i = 0; i < param.num_offset; i++) param.offset[i] *= 4.0 * kappa * kappa;
+        } else if (param.mass_normalization == QUDA_ASYMMETRIC_MASS_NORMALIZATION) {
+	  blas::ax(2.0*kappa, b);
+          if (for_multishift)
+            for (int i = 0; i < param.num_offset; i++) param.offset[i] *= 2.0 * kappa;
+        }
+        break;
+      case QUDA_MATPCDAG_MATPC_SOLUTION:
+        if (param.mass_normalization == QUDA_MASS_NORMALIZATION) {
+	  blas::ax(16.0*std::pow(kappa,4), b);
+          if (for_multishift)
+            for (int i = 0; i < param.num_offset; i++) param.offset[i] *= 16.0 * std::pow(kappa, 4);
+        } else if (param.mass_normalization == QUDA_ASYMMETRIC_MASS_NORMALIZATION) {
+	  blas::ax(4.0*kappa*kappa, b);
+          if (for_multishift)
+            for (int i = 0; i < param.num_offset; i++) param.offset[i] *= 4.0 * kappa * kappa;
+        }
+        break;
+      default:
+        errorQuda("Solution type %d not supported", param.solution_type);
+    }
+
+    logQuda(QUDA_DEBUG_VERBOSE, "Mass rescale: norm of source out = %g\n", blas::norm2(b));
+  }
+
+  void setupHermitianWilson(QudaInvertParam *param, const lat_dim_t &X, std::vector<ColorSpinorField> &evecs, std::vector<Complex> &evals)
+  {
+    DiracParam diracWilsonParam;
+    setDiracParam(diracWilsonParam, param, false);
+    Dirac *dWilson = new DiracWilson(diracWilsonParam);
+
+    // Construct vectors
+    //------------------------------------------------------
+    // Create host wrappers around application vector set
+    ColorSpinorParam cpuParam(nullptr, *param, X, QUDA_MAT_SOLUTION, QUDA_CUDA_FIELD_LOCATION);
+
+    int n_eig = param->hermitian_wilson_n_ev;
+
+    // Create device side ColorSpinorField vector space to pass to the
+    // compute function. Download any user supplied data as an initial guess.
+    ColorSpinorParam cudaParam(cpuParam, *param, QUDA_CUDA_FIELD_LOCATION);
+    cudaParam.create = QUDA_ZERO_FIELD_CREATE;
+    cudaParam.setPrecision(param->cuda_prec_eigensolver, param->cuda_prec_eigensolver, true);
+    // Ensure device vectors qre in UKQCD basis for Wilson type fermions
+    cudaParam.gammaBasis = QUDA_UKQCD_GAMMA_BASIS;
+
+    for (int i = 0; i < n_eig; i++) {
+      evecs[i] = ColorSpinorField(cudaParam);
+      evals[i] = 0.0;
+    }
+
+    //------------------------------------------------------
+    // We must construct the correct Dirac operator type based on the three
+    // options: The normal operator, the daggered operator, and if we pre
+    // multiply by gamma5. Each combination requires a unique Dirac operator
+    // object.
+
+    // Use MdagM=(G5M)^2 to make sure all eigenvalus>0
+    DiracMatrix *mWilson = new DiracMdagM(*dWilson);
+    QudaEigParam eig_param = newQudaEigParam();
+    int n_kr = param->hermitian_wilson_n_kr;
+
+    eig_param.eig_type = QUDA_EIG_TR_LANCZOS;
+    eig_param.use_poly_acc = QUDA_BOOLEAN_TRUE;
+    eig_param.poly_deg = 50;
+    eig_param.a_min = 0.2 * 0.2;
+    eig_param.a_max = (1 + 8 * param->kappa) * (1 + 8 * param->kappa);
+    eig_param.use_dagger = QUDA_BOOLEAN_FALSE;
+    eig_param.use_norm_op = QUDA_BOOLEAN_TRUE;
+    eig_param.use_pc = QUDA_BOOLEAN_FALSE;
+    eig_param.compute_gamma5 = QUDA_BOOLEAN_FALSE;
+    eig_param.spectrum = QUDA_SPECTRUM_SR_EIG;
+    eig_param.n_ev = param->hermitian_wilson_n_ev;
+    eig_param.n_kr = param->hermitian_wilson_n_kr;
+    eig_param.n_conv = param->hermitian_wilson_n_ev;
+    eig_param.tol = param->hermitian_wilson_tol;
+    eig_param.vec_infile[0] = 0;
+    eig_param.vec_outfile[0] = 0;
+    eig_param.max_restarts = 1000;
+
+    // auto *eig_solve = quda::EigenSolver::create(&eig_param, *mWilson, profileEigensolve);
+    auto *eig_solve = quda::EigenSolver::create(&eig_param, *mWilson);
+    (*eig_solve)(evecs, evals);
+    delete eig_solve;
+
+    // Recalculate eigenvalues
+    delete mWilson;
+    mWilson = new DiracG5M(*dWilson);
+    ColorSpinorField tmp(cudaParam);
+    for (int i = 0; i < n_eig; ++i) {
+      (*mWilson)(tmp, evecs[i]);
+      evals[i] = blas::cDotProduct(tmp, evecs[i]);
+    }
+
+    delete mWilson;
+    delete dWilson;
+
+  }
+}
+
+void distanceReweight(ColorSpinorField &b, QudaInvertParam &param, bool inverse)
+{
+  // Force the alpha0 to be positive.
+  // A negative alpha0 matches something like Eq.(12) in arXiv:1006.4028.
+  // Disable the negative situation as QUDA already has multigrid for light quarks.
+  const double alpha0 = abs(param.distance_pc_alpha0);
+  const int t0 = param.distance_pc_t0;
+  if (alpha0 != 0.0 && t0 >= 0) {
+    if (param.dslash_type != QUDA_WILSON_DSLASH && param.dslash_type != QUDA_CLOVER_WILSON_DSLASH) {
+      errorQuda("Only Wilson and Wilson-clover dslash support distance preconditioning, but get dslash_type %d\n",
+                param.dslash_type);
+    }
+    if (param.inv_type == QUDA_MG_INVERTER) {
+      errorQuda("Multigrid solver doesn't support distance preconditioning\n");
+    }
+    if (param.cuda_prec != QUDA_DOUBLE_PRECISION || param.cuda_prec_sloppy != QUDA_DOUBLE_PRECISION) {
+      warningQuda(
+        "Using single or half (sloppy) precision in distance preconditioning sometimes makes the solver diverge");
+    }
+
+    if (inverse)
+      spinorDistanceReweight(b, -alpha0, t0);
+    else
+      spinorDistanceReweight(b, alpha0, t0);
+  }
 }
 
 void dslashQuda(void *h_out, void *h_in, QudaInvertParam *inv_param, QudaParity parity)
@@ -2761,6 +2943,18 @@ void eigensolveQuda(void **host_evecs, double _Complex *host_evals, QudaEigParam
                 eig_param->use_dagger ? "true" : "false", eig_param->use_norm_op ? "true" : "false");
     }
   }
+
+  // pre-setttings for the overlap operator
+  if (inv_param->dslash_type == QUDA_OVERLAP_DSLASH) {
+    const auto &gauge = *gaugePrecise;
+    const int n_eig = inv_param->hermitian_wilson_n_ev;
+    const double invsqrt_tol = inv_param->overlap_invsqrt_tol;
+    std::vector<ColorSpinorField> evecs(n_eig);
+    std::vector<Complex> evals(n_eig);
+    setupHermitianWilson(inv_param, gauge.X(), evecs, evals);
+    ((DiracOverlap*)dirac)->setupHermitianWilson(n_eig, evecs, evals, invsqrt_tol);
+  }
+
   //------------------------------------------------------
   // We must construct the correct Dirac operator type based on the three
   // options: The normal operator, the daggered operator, and if we pre
