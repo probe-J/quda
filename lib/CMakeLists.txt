@@ -81,6 +81,7 @@ set (QUDA_OBJS
   extract_gauge_ghost_extended.cu copy_color_spinor.cpp
   spin_duplicate.cu
   spinor_noise.cu spinor_dilute.cu spinor_reweight.cu
+  spinor_chiral_project.cu
   copy_color_spinor_dd.cu copy_color_spinor_ds.cu
   copy_color_spinor_dh.cu copy_color_spinor_dq.cu
   copy_color_spinor_ss.cu copy_color_spinor_sd.cu

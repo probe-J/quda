@@ -640,6 +640,12 @@ typedef enum QudaExtLibType_s {
   QUDA_EXTLIB_INVALID = QUDA_INVALID_ENUM
 } QudaExtLibType;
 
+typedef enum QudaChirality_s {
+  QUDA_CHIRALITY_UPPER,
+  QUDA_CHIRALITY_LOWER,
+  QUDA_CHIRALITY_INVALID = QUDA_INVALID_ENUM
+} QudaChirality;
+
 typedef enum QudaDDType_s { QUDA_DD_NO, QUDA_DD_RED_BLACK, QUDA_DD_INVALID = QUDA_INVALID_ENUM } QudaDDType;
 
 typedef enum QudaWFlowStepType_s {
