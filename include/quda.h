@@ -457,6 +457,12 @@ extern "C" {
     /** Whether to use fused kernels for mobius */
     QudaBoolean use_mobius_fused_kernel;
 
+    /** Parameters for overlap fermion */
+    double overlap_invsqrt_tol;
+    int ov_n_ev;
+    double_complex *ov_eigvals;
+    double_complex **ov_eigvecs;
+    double *ov_masses;
     /**
      * Parameters for distance preconditioning algorithm proposed in arXiv:1006.4028,
      * which is useful to solve a precise heavy quark propagator.
