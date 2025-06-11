@@ -189,15 +189,6 @@ namespace quda {
     } else if (param.type == QUDA_OVERLAP_DIRAC) {
       if (getVerbosity() >= QUDA_DEBUG_VERBOSE) printfQuda("Creating a DiracOverlap operator\n");
       return new DiracOverlap(param);
-    } else if (param.type == QUDA_OVERLAPPC_DIRAC) {
-      if (getVerbosity() >= QUDA_DEBUG_VERBOSE) printfQuda("Creating a DiracOverlapPC operator\n");
-      errorQuda("Overlap Dirac doesn't support even-odd preconditioning\n");
-    } else if (param.type == QUDA_CHIRAL_OVERLAP_DIRAC) {
-      if (getVerbosity() >= QUDA_DEBUG_VERBOSE) printfQuda("Creating a DiracChiralOverlap operator\n");
-      return new DiracChiralOverlap(param);
-    } else if (param.type == QUDA_CHIRAL_OVERLAPPC_DIRAC) {
-      if (getVerbosity() >= QUDA_DEBUG_VERBOSE) printfQuda("Creating a DiracChiralOverlapPC operator\n");
-      errorQuda("Overlap Dirac doesn't support even-odd preconditioning\n");
     }else if (param.type == QUDA_STAGGERED_DIRAC) {
       if (getVerbosity() >= QUDA_DEBUG_VERBOSE) printfQuda("Creating a DiracStaggered operator\n");
       return new DiracStaggered(param);

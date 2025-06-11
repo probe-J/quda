@@ -463,6 +463,7 @@ extern "C" {
     double_complex *ov_eigvals;
     double_complex **ov_eigvecs;
     double *ov_masses;
+
     /**
      * Parameters for distance preconditioning algorithm proposed in arXiv:1006.4028,
      * which is useful to solve a precise heavy quark propagator.
@@ -1216,6 +1217,9 @@ extern "C" {
    * @param param Contains all metadata regarding the type of solve.
    */
   void eigensolveQuda(void **h_evecs, double_complex *h_evals, QudaEigParam *param);
+
+  void invertOverlapQuda(void *hp_x, void *hp_b, QudaInvertParam *param);
+  void invertOverlapMultiShiftQuda(void **hp_x, void *hp_b, QudaInvertParam *param);
 
   /**
    * Perform the solve, according to the parameters set in param.  It
