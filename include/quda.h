@@ -1220,7 +1220,6 @@ extern "C" {
 
   void loadOverlapQuda(QudaInvertParam *inv_param, QudaEigParam *eig_param);
   void freeOverlapQuda();
-  void invertOverlapQuda(void *hp_x, void *hp_b, QudaInvertParam *param);
   void invertOverlapMultiShiftQuda(void **hp_x, void *hp_b, QudaInvertParam *param);
 
   /**
