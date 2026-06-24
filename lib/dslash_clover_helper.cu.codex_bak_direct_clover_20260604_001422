@@ -22,18 +22,14 @@ namespace quda {
     {
       setRHSstring(aux, in.size());
       if (in.Nspin() != 4 || out.Nspin() != 4) errorQuda("Unsupported nSpin=%d %d", out.Nspin(), in.Nspin());
+      if (!inverse) errorQuda("Unsupported direct application");
       apply(device::get_default_stream());
     }
 
     void apply(const qudaStream_t &stream)
     {
       TuneParam tp = tuneLaunch(*this, getTuning(), getVerbosity());
-      if (inverse) {
-        launch<CloverApply>(tp, stream, CloverArg<Float, nColor, true>(out, in, clover, parity));
-      } else {
-        // PyQUDA Hasenbusch force probe 需要直接应用 base clover A，不能固定走 clover inverse。
-        launch<CloverApply>(tp, stream, CloverArg<Float, nColor, false>(out, in, clover, parity));
-      }
+      launch<CloverApply>(tp, stream, CloverArg<Float, nColor>(out, in, clover, parity));
     }
 
     // Backup if in and out fields alias
