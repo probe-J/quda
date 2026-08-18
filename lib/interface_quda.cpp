@@ -4825,6 +4825,14 @@ void computeStoutForceQuda(void *h_force, QudaGaugeParam *gauge_param, QudaGauge
   if (!gaugePrecise) errorQuda("No resident gauge field");
 
   if (smear_param->smear_type != QUDA_GAUGE_SMEAR_STOUT) errorQuda("Unsupported smear type %d", smear_param->smear_type);
+  // 当前接口只回传一层各向同性 stout Jacobian；显式拒绝静默错误的多层或各向异性配置。
+  if (smear_param->n_steps != 1)
+    errorQuda("computeStoutForceQuda supports exactly one stout step, received %d", smear_param->n_steps);
+  if (smear_param->smear_anisotropy != 1.0)
+    errorQuda("computeStoutForceQuda does not yet support smear_anisotropy=%g", smear_param->smear_anisotropy);
+  if (smear_param->dir_ignore != 3 && smear_param->dir_ignore != 4)
+    errorQuda("computeStoutForceQuda HMC mode requires dir_ignore=3 (S3) or 4 (S4), received %d",
+              smear_param->dir_ignore);
 
   GaugeFieldParam fParam(*gauge_param, h_force, QUDA_ASQTAD_GENERAL_LINKS);
   GaugeField cpuForce = !gauge_param->use_resident_force ? GaugeField(fParam) : GaugeField();
